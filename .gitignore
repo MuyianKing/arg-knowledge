@@ -1,0 +1,16 @@
+.venv/
+models/
+tools/
+logs/
+__pycache__/
+*.py[cod]
+.env
+*.log
+data/
+qdrant_storage/
+redis_data/
+snapshots/
+.tmp-dl/
+.qdrant-initialized
+.pytest_cache/
+.ruff_cache/

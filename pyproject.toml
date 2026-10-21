@@ -1,0 +1,33 @@
+[project]
+name = "enterprise-rag"
+version = "0.1.0"
+description = "Enterprise RAG knowledge base service"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "models", "data", "tools", "qdrant_storage", "logs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "RUF"]
+# B008: FastAPI Depends() in defaults is the documented pattern.
+# RUF001-003: Chinese full-width punctuation is intentional in prompts/messages.
+ignore = ["B905", "B008", "RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = true
