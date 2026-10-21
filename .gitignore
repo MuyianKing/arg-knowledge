@@ -14,3 +14,4 @@ snapshots/
 .qdrant-initialized
 .pytest_cache/
 .ruff_cache/
+.agents/
