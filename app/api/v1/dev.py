@@ -1,6 +1,6 @@
 """Local debugging endpoints. Only registered when DEV_TOOLS_ENABLED=true.
 
-These endpoints let the bundled web console (web/) configure the LLM at runtime,
+These endpoints let the desktop client (desktop/) configure the LLM at runtime,
 inspect retrieval, and upload documents without using the CLI. They are not part
 of the public engine contract and must never be enabled in production.
 """
@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Uplo
 
 from app.config import settings
 from app.core.context import EngineContext, get_engine_context
-from app.ingest.parsers import SUPPORTED_EXTENSIONS
+from app.core.uploads import safe_filename as _safe_filename
+from app.core.uploads import save_upload as _save_upload
 from app.schemas.dev import (
     IngestResponse,
     LLMConfigResponse,
@@ -30,46 +31,6 @@ from app.schemas.dev import (
 )
 
 router = APIRouter(prefix="/dev", tags=["dev"])
-
-_UPLOAD_CHUNK = 1024 * 1024
-
-
-def _safe_filename(filename: str | None) -> str:
-    name = Path(filename or "").name.strip()
-    if not name or name in {".", ".."}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="缺少文件名",
-        )
-    if len(name) > 200:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="文件名过长",
-        )
-    if Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
-        allowed = ", ".join(sorted(SUPPORTED_EXTENSIONS))
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"不支持的文件类型，允许：{allowed}",
-        )
-    return name
-
-
-async def _save_upload(file: UploadFile, target: Path, max_bytes: int) -> None:
-    size = 0
-    handle = await asyncio.to_thread(target.open, "wb")
-    try:
-        while chunk := await file.read(_UPLOAD_CHUNK):
-            size += len(chunk)
-            if size > max_bytes:
-                raise HTTPException(
-                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-                    detail=f"文件超过 {settings.max_upload_mb} MB 限制",
-                )
-            await asyncio.to_thread(handle.write, chunk)
-    finally:
-        await asyncio.to_thread(handle.close)
-        await file.close()
 
 
 @router.get("/llm", response_model=LLMConfigResponse, summary="查看当前 LLM 配置")

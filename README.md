@@ -19,10 +19,11 @@
 - [x] 生成：外部 OpenAI 兼容 API；引用校验、拒答、重试/熔断/降级
 - [x] 基础入库：解析、切分、embedding、upsert（样例已入库 5 chunk）
 - [x] Qdrant 1.19.2 本地跑通，`/health` 与 `/api/v1/ask` 已验证
+- [x] HTTP 异步入库：`POST /api/v1/ingest` + `GET /api/v1/jobs`
+- [x] 文档列表与删除：`GET /api/v1/documents`、`DELETE /api/v1/documents/{doc_id}`，含缓存失效
 - [ ] 完整表格/代码切分策略
-- [ ] HTTP 入库/预览/job 接口
+- [ ] 入库预览 HTTP 接口
 - [ ] Golden set、RAGAS、CI 门禁
-- [ ] 文档更新/删除、缓存失效
 
 ## 环境
 
@@ -43,8 +44,8 @@ uv pip install --python .venv/Scripts/python.exe \
 .venv/Scripts/python.exe -c "import torch; print(torch.cuda.is_available())"
 uv pip install --python .venv/Scripts/python.exe -r requirements.txt
 
-# 2. 下载本地模型（约 4.3 GB）
-bash scripts/download_models.sh
+# 2. 下载本地模型（约 4.3 GB，下载到 runtime/models）
+.venv/Scripts/python.exe scripts/download_models.py
 .venv/Scripts/python.exe scripts/verify_models.py
 
 # 3. 启动 Qdrant + Redis（Docker）或用 Windows 版 Qdrant
@@ -65,7 +66,8 @@ cp .env.example .env
 
 ```bash
 # 用 Windows 版 Qdrant 代替 Docker
-QDRANT__STORAGE__STORAGE_PATH=./qdrant_storage tools/qdrant/qdrant.exe
+QDRANT__STORAGE__STORAGE_PATH=./runtime/qdrant_storage \
+  runtime/tools/qdrant/qdrant.exe
 
 # 关掉 Redis、用 mock LLM 跑通 API 全链路
 CACHE_ENABLED=false LLM_MOCK=true \
@@ -74,27 +76,68 @@ CACHE_ENABLED=false LLM_MOCK=true \
 
 `LLM_MOCK=true` 只用于联调，回答会带 `[MOCK]` 前缀；生产必须接真实 OpenAI 兼容 API。
 
-## 调试台（Web）
-
-内置一个零依赖的单页调试台，覆盖健康检查、问答、仅检索、上传入库、LLM 配置（Base URL / API Key / Model）与连通性测试。
+### 一键启动（开发）
 
 ```bash
-# 1. 引擎开启调试接口
-DEV_TOOLS_ENABLED=true CACHE_ENABLED=false \
-  .venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8080
-
-# 2. 另开一个终端：静态页 + /engine 代理（默认 http://127.0.0.1:8090）
-.venv/Scripts/python.exe scripts/dev_web.py
+./run.sh              # Git Bash / WSL
+run.bat               # cmd / PowerShell
+./run.sh --mock-llm   # 没有配置真实 LLM 时，先用 mock 跑通链路
 ```
 
-浏览器打开 <http://127.0.0.1:8090>：
+脚本会依次启动 Qdrant、幂等创建 collection、启动引擎（`DEV_TOOLS_ENABLED=true`），
+再启动 `desktop/` 的 Tauri 开发窗口。已有实例会复用；Ctrl+C 只停止本次脚本启动的进程。
+日志在 `runtime/logs/dev/`。`./run.sh --check` 只打印环境检查结果。
 
-- **LLM 配置**页填写 Base URL / API Key / Model，点「保存并应用」，再点「测试连接」。
-- **问答**页验证检索 → 重排 → 生成 → 引用；**检索**页只看召回与分数。
-- **入库**页可直接上传文件（与 `scripts/ingest.py` 等价的同步入库）。
-- 页面通过 `/engine/*` 代理访问引擎，无需配置 CORS。
-- LLM 配置只在引擎内存生效，重启后回退 `.env`；Key 不写盘、不返回明文。
-- 调试接口与页面仅限本地/内网，生产必须保持 `DEV_TOOLS_ENABLED=false`。
+### 数据目录
+
+仓库开发默认把运行时数据收在 `runtime/`，源码目录只保留代码和 `.venv`：
+
+```text
+runtime/
+├─ models/           # 4.3 GB 本地模型
+├─ qdrant_storage/   # 向量库数据
+├─ data/uploads/     # 上传临时文件
+├─ logs/dev/         # 一键启动日志
+└─ tools/qdrant/     # qdrant.exe
+```
+
+桌面应用把引擎装到用户目录时，通过 `APP_HOME` 改根目录：
+
+```bash
+APP_HOME="%LOCALAPPDATA%/ARG-Knowledge" WARMUP_ON_STARTUP=true \
+  .venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8080
+```
+
+此时 `.env`、`models/`、`data/` 都在 `APP_HOME` 下。`APP_HOME` 只从进程环境变量读取，
+不写在 `.env` 里。`WARMUP_ON_STARTUP=true` 会在启动时加载模型，`/health` 的 `ready`
+与 `warmup_ms` 用于向导判断预热是否完成。
+
+## 桌面客户端（Tauri，P1）
+
+`desktop/` 是 Tauri v2 + React + TypeScript 客户端。客户端与后台**解耦**：
+只通过 `baseUrl` 访问 `/health`、`/api/v1/*`，不关心后台部署在哪里。
+
+同一个应用里还有一个可选的**本地部署助手**，负责检测环境、创建虚拟环境、
+校验模型并托管 Qdrant/引擎；部署完成后只是把 `baseUrl` 填成本机地址。
+之后随时可以改成内网或其他服务器上的引擎，客户端不需要重新部署。
+
+```bash
+cd desktop
+npm install
+npm run tauri dev
+```
+
+开发时复用仓库现有环境：
+
+```bash
+ARG_ENGINE_ROOT="E:/muyian/ARG-knowledge" \
+ARG_VENV_DIR="E:/muyian/ARG-knowledge/.venv" \
+ARG_MODELS_DIR="E:/muyian/ARG-knowledge/runtime/models" \
+ARG_QDRANT_BIN="E:/muyian/ARG-knowledge/runtime/tools/qdrant/qdrant.exe" \
+npm run tauri dev
+```
+
+详细说明见 [desktop/README.md](desktop/README.md)。
 
 ## 调用方式
 
@@ -176,16 +219,18 @@ app/
     chunking.py        # 切分策略
     pipeline.py        # 入库流水线
   services/rag.py      # 问答编排
+  services/jobs.py     # 内存 job store + 串行入库 worker
 scripts/
-  download_models.sh
+  dev.py               # 一键启动 Qdrant + 引擎 + 桌面端
+  download_models.py
   verify_models.py
   create_collection.py
   ingest.py
   ask.py
-  dev_web.py           # 调试台静态服务 + 引擎代理
+  dev.py               # 一条命令启动 Qdrant + 引擎 + 桌面端
   check.sh / format.sh
-web/                   # 单页调试台（零构建、零依赖）
-models/                # 本地 embedding/reranker/bm25（gitignore）
+desktop/               # Tauri v2 + React 客户端与本地部署助手
+runtime/               # models/qdrant_storage/data/logs/tools（gitignore）
 docker-compose.yml     # Qdrant + Redis
 ```
 
@@ -194,5 +239,7 @@ docker-compose.yml     # Qdrant + Redis
 - 表格整块保留，超大表格可能超过 embedding 长度；后续按行组切分并重复表头。
 - 代码文件暂用通用递归切分，未按函数边界切分。
 - 引用语义校验目前只做编号存在性校验，NLI/LLM judge 抽样待接入。
-- 入库默认是 CLI 同步执行；`/api/v1/dev/ingest` 仅用于本地调试，生产异步 job 接口待实现。
-- 文档更新/删除、缓存失效、golden set/RAGAS 待实现。
+- 回答目前是一次性返回，SSE/流式输出尚未实现。
+- 任务历史在内存中，多实例部署需要换成 Redis/数据库。
+- `/api/v1/documents` 最多扫描 `max_points` 个 chunk，百万级需要独立元数据表。
+- golden set/RAGAS 评估待实现。

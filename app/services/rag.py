@@ -30,6 +30,11 @@ class RAGService:
         self._llm = llm
         self._cache = cache
 
+    async def clear_cache(self) -> None:
+        """Invalidate cached answers after documents are ingested or deleted."""
+
+        await self._cache.clear()
+
     async def answer(
         self,
         request: AskRequest,

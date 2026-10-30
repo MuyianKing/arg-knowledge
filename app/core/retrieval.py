@@ -114,6 +114,10 @@ class RetrievalService:
     def bm25(self):
         return self._bm25
 
+    @property
+    def is_loaded(self) -> bool:
+        return self._embedder is not None and self._reranker is not None and self._bm25 is not None
+
     async def ensure_models(self) -> None:
         """Load embedding models once so ingestion can reuse them."""
 

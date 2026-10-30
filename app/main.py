@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -13,6 +14,7 @@ from app.config import settings
 from app.core.cache import Cache, MemoryCache
 from app.core.llm import LLMClient
 from app.core.retrieval import RetrievalService
+from app.services.jobs import JobStore
 from app.services.rag import RAGService
 
 
@@ -34,11 +36,18 @@ async def lifespan(app: FastAPI):
     )
     app.state.ingest = None
     app.state.ingest_lock = None
-    if settings.dev_tools_enabled:
-        from app.ingest.pipeline import IngestPipeline
+    app.state.ingest_tasks = set()
+    app.state.job_store = JobStore()
+    app.state.warmup_ms = None
+    if settings.warmup_on_startup:
+        started = time.monotonic()
+        await retrieval.ensure_models()
+        app.state.warmup_ms = int((time.monotonic() - started) * 1000)
 
-        app.state.ingest = IngestPipeline()
-        app.state.ingest_lock = asyncio.Lock()
+    from app.ingest.pipeline import IngestPipeline
+
+    app.state.ingest = IngestPipeline()
+    app.state.ingest_lock = asyncio.Lock()
     try:
         yield
     finally:

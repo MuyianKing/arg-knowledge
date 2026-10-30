@@ -195,7 +195,7 @@ async def get_rag_service(request: Request) -> RAGService:
   - 测试结果
   - API/文档更新
   - 安全影响（tenant/acl、上传、外部 LLM API）
-- 不提交生成物：`models/`、`data/`、`logs/`、`qdrant_storage/`、`.venv/`、`tools/`。
+- 不提交生成物：`runtime/`、`models/`、`data/`、`logs/`、`qdrant_storage/`、`.venv/`、`tools/`。
 
 ## 16. 常用反模式
 

@@ -43,15 +43,16 @@ app/
       __init__.py
       router.py          # 汇总 v1 路由
       ask.py             # POST /api/v1/ask
-      ingest.py          # POST /api/v1/ingest/preview、POST /api/v1/ingest、GET /api/v1/jobs/{id}
-      health.py          # GET /health（根路径，供 LB/探针）
+      ingest.py          # POST /api/v1/ingest、GET /api/v1/jobs、GET /api/v1/jobs/{id}
+      documents.py       # GET /api/v1/documents、DELETE /api/v1/documents/{doc_id}
+      dev.py             # /api/v1/dev/*（仅 DEV_TOOLS_ENABLED=true）
   schemas/
-    common.py            # ErrorResponse、Pagination
-    ask.py               # AskRequest/AskResponse/Citation/Filters
-    ingest.py            # IngestJobResponse、PreviewResponse
+    ask.py             # AskRequest/AskResponse/Citation/Filters
+    ingest.py          # IngestAccepted、JobResponse、JobListResponse
+    documents.py       # DocumentItem、DocumentListResponse、DeleteDocumentResponse
   services/
     rag.py
-    ingest_jobs.py       # 内存 job store + 串行 worker
+    jobs.py            # 内存 job store + 串行入库 worker
   core/
     context.py           # X-Tenant-Id / X-Acl 可信上下文
     cache.py
@@ -71,8 +72,7 @@ tests/
   conftest.py
 scripts/
 docs/
-data/
-models/
+runtime/       # models/qdrant_storage/data/logs/tools（gitignore）
 ```
 
 ## 4. 请求流
@@ -148,8 +148,9 @@ Qdrant collection `kb`：
 | Schema | `app/api/schemas.py` 单文件 | `app/schemas/` 按领域拆分 |
 | 错误响应 | FastAPI 默认 `{"detail": ...}` | 统一 `{"error": {"code", "message", "request_id"}}` |
 | 请求 ID | 仅 `/api/v1/ask` 读 `X-Request-Id` | 中间件统一生成/透传 |
-| 入库 | 仅 CLI `scripts/ingest.py` | `POST /api/v1/ingest` + job 轮询 |
-| 前端 | 无 | 独立前端项目，后端只给 API |
+| 入库 | `POST /api/v1/ingest` + `GET /api/v1/jobs`，内存 job store | 多实例时把 job store 换成 Redis/数据库 |
+| 文档管理 | `GET /api/v1/documents`、`DELETE /api/v1/documents/{doc_id}` | 大规模知识库改用独立元数据表/分页 |
+| 前端 | 独立 `desktop/` Tauri 客户端 | 客户端只走 HTTP，本地部署向导独立维护 |
 
 迁移原则：**新功能按目标结构写；旧文件在独立重构中迁移，不和功能 PR 混合。**
 

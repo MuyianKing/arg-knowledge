@@ -24,9 +24,13 @@ async def health(request: Request) -> dict:
         qdrant_ok = False
 
     status = "ok" if all(models.values()) and qdrant_ok else "degraded"
+    retrieval = request.app.state.retrieval
     return {
         "status": status,
         "ts": int(time.time()),
+        "ready": retrieval.is_loaded,
+        "warmup_ms": getattr(request.app.state, "warmup_ms", None),
+        "warmup_on_startup": settings.warmup_on_startup,
         "models": models,
         "qdrant": qdrant_ok,
     }

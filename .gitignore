@@ -1,4 +1,7 @@
 .venv/
+# Runtime data (models, Qdrant storage, uploads, logs, tools) lives here.
+runtime/
+# Legacy locations kept ignored so stray files never get committed.
 models/
 tools/
 logs/
@@ -15,3 +18,9 @@ snapshots/
 .pytest_cache/
 .ruff_cache/
 .agents/
+
+# desktop
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

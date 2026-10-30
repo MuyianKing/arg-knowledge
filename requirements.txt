@@ -23,3 +23,6 @@ transformers>=4.45
 llama-index-core==0.14.24
 llama-index-vector-stores-qdrant>=0.8
 llama-index-readers-file>=0.4
+# Model download for the desktop setup wizard / scripts/download_models.*
+huggingface_hub>=0.26,<1
+hf_xet>=0.1

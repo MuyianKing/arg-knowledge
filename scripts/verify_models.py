@@ -1,12 +1,22 @@
-"""Verify that all required model files are present and non-truncated."""
+"""Verify that all required model files are present and non-truncated.
+
+The desktop setup wizard runs this with ``--json`` to drive the model step.
+"""
 
 from __future__ import annotations
 
+import argparse
+import json
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MODELS = ROOT / "models"
+_REPO_RUNTIME = ROOT / "runtime" / "models"
+if not os.environ.get("APP_HOME") and _REPO_RUNTIME.is_dir():
+    DEFAULT_MODELS = _REPO_RUNTIME
+else:
+    DEFAULT_MODELS = Path(os.environ.get("APP_HOME") or ROOT) / "models"
 
 # path -> minimum bytes
 EXPECTED: dict[str, int] = {
@@ -35,38 +45,64 @@ EXPECTED: dict[str, int] = {
 }
 
 
-def main() -> int:
+def inspect(models_dir: Path) -> dict:
     missing: list[str] = []
-    bad: list[str] = []
+    truncated: list[dict] = []
     total = 0
 
     for rel, minimum in EXPECTED.items():
-        path = MODELS / rel
+        path = models_dir / rel
         if not path.exists():
             missing.append(rel)
             continue
         size = path.stat().st_size
         total += size
         if size < minimum:
-            bad.append(f"{rel}: {size:,} < {minimum:,}")
+            truncated.append({"path": rel, "size": size, "minimum": minimum})
 
-    print(f"Model root: {MODELS}")
-    print(f"Checked {len(EXPECTED)} required files; total {total / 1024**3:.2f} GiB")
+    return {
+        "ok": not missing and not truncated,
+        "model_root": str(models_dir),
+        "checked": len(EXPECTED),
+        "total_bytes": total,
+        "missing": missing,
+        "truncated": truncated,
+    }
 
-    if missing:
-        print("\nMISSING:")
-        for rel in missing:
-            print(f"  - {rel}")
-    if bad:
-        print("\nTRUNCATED / TOO SMALL:")
-        for item in bad:
-            print(f"  - {item}")
 
-    if missing or bad:
-        return 1
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Verify required model files")
+    parser.add_argument(
+        "--models-dir",
+        type=Path,
+        default=DEFAULT_MODELS,
+        help=f"model root (default: {DEFAULT_MODELS})",
+    )
+    parser.add_argument("--json", action="store_true", help="emit a machine-readable report")
+    args = parser.parse_args()
 
-    print("\nAll required model files are present.")
-    return 0
+    report = inspect(args.models_dir)
+
+    if args.json:
+        print(json.dumps(report, ensure_ascii=False))
+    else:
+        print(f"Model root: {report['model_root']}")
+        print(
+            f"Checked {report['checked']} required files; "
+            f"total {report['total_bytes'] / 1024**3:.2f} GiB"
+        )
+        if report["missing"]:
+            print("\nMISSING:")
+            for rel in report["missing"]:
+                print(f"  - {rel}")
+        if report["truncated"]:
+            print("\nTRUNCATED / TOO SMALL:")
+            for item in report["truncated"]:
+                print(f"  - {item['path']}: {item['size']:,} < {item['minimum']:,}")
+        if report["ok"]:
+            print("\nAll required model files are present.")
+
+    return 0 if report["ok"] else 1
 
 
 if __name__ == "__main__":

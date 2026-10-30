@@ -38,7 +38,7 @@ uv pip install --python .venv/Scripts/python.exe -r requirements.txt
 .venv/Scripts/python.exe -m ruff format --check app tests scripts
 
 # 启动 Qdrant（本机 Windows 版）
-QDRANT__STORAGE__STORAGE_PATH=./qdrant_storage tools/qdrant/qdrant.exe
+QDRANT__STORAGE__STORAGE_PATH=./runtime/qdrant_storage runtime/tools/qdrant/qdrant.exe
 
 # 建库
 .venv/Scripts/python.exe scripts/create_collection.py
@@ -46,11 +46,19 @@ QDRANT__STORAGE__STORAGE_PATH=./qdrant_storage tools/qdrant/qdrant.exe
 # 启动 API
 CACHE_ENABLED=false LLM_MOCK=true \
   .venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8080
+
+# 一键启动 Qdrant + 引擎 + 桌面端（推荐）
+./run.sh --mock-llm
+
+# 桌面客户端（Tauri）
+cd desktop && npm install && npm run tauri dev
+cd desktop && npx tsc --noEmit && npm run build
+cd desktop/src-tauri && cargo check
 ```
 
 ## 3. 硬性约束
 
-- **不得提交** `.venv/`、`models/`、`data/`、`tools/`、`logs/`、`qdrant_storage/`、`.env`。
+- **不得提交** `.venv/`、`runtime/`、`models/`、`data/`、`tools/`、`logs/`、`qdrant_storage/`、`.env`。
 - **不得把密钥写进代码/镜像/日志**；外部 LLM API Key 走环境变量或密钥管理。
 - **不得默认调用公网 embedding/rerank API**。生成 LLM 走外部 OpenAI 兼容 API，按 `需求.md` 7.1：
   - 只发送 query + top-k chunk，不发送完整文档/向量；
@@ -64,7 +72,7 @@ CACHE_ENABLED=false LLM_MOCK=true \
 - **不得绕过** `app/core/context.py` 直接读请求头里的租户。
 - **改 API 必须同步更新** `docs/API.md` 和 OpenAPI 示例。
 - **改数据模型/collection 必须同步更新** `需求.md` 9.1 和 `scripts/create_collection.py`。
-- **不要修改** `models/` 下的权重文件；模型版本变更走 `需求.md` 的变更评审。
+- **不要修改** `runtime/models/` 下的权重文件；模型版本变更走 `需求.md` 的变更评审。
 
 ## 4. 目录约定
 
@@ -85,13 +93,22 @@ app/
 tests/
   unit/
   integration/
-scripts/               # CLI：下载、建库、入库、冒烟
+scripts/               # CLI：一键启动、下载、建库、入库、冒烟
+desktop/               # Tauri 客户端 + 本地部署助手（与引擎解耦）
 docs/                  # API、架构、规范
-data/                  # 本地样例/上传（gitignore）
-models/                # 本地模型（gitignore）
+runtime/               # 运行时数据：models/qdrant_storage/data/logs/tools（gitignore）
+data/                  # 兼容旧路径（gitignore）
+models/                # 兼容旧路径（gitignore）
 ```
 
 当前代码是 v0.1 结构：`app/api/routes.py`、`app/api/schemas.py` 尚未拆分。**新接口必须按目标结构落到 `app/api/v1/` 和 `app/schemas/`**；旧文件在独立重构 PR 中迁移，不和功能改动混在一起。
+
+`desktop/` 的硬性约束：
+
+- 客户端只能通过 `baseUrl` 访问引擎，**不得**用本地进程状态推断引擎是否在线。
+- 本地部署助手（检测、安装、启停进程）是独立能力，只写 `baseUrl` 和本地部署参数，不得变成客户端通信的前置条件。
+- 本机后台是独立服务：关闭客户端不得停止 Qdrant/引擎；停止必须显式操作。
+- 开发复用仓库环境用 `ARG_ENGINE_ROOT` / `ARG_VENV_DIR` / `ARG_MODELS_DIR` / `ARG_QDRANT_BIN`，不要把这些路径写死。
 
 ## 5. 完成定义（DoD）
 

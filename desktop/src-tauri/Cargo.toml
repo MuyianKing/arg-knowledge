@@ -1,0 +1,29 @@
+[package]
+name = "arg-knowledge-desktop"
+version = "0.1.0"
+description = "ARG Knowledge desktop shell"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "arg_knowledge_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "arg-knowledge-desktop"
+path = "src/main.rs"
+test = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "process", "io-util", "time", "fs", "sync"] }
+sysinfo = "0.33"
+keyring = { version = "3", default-features = false, features = ["windows-native"] }

@@ -15,6 +15,8 @@ class CacheProtocol(Protocol):
 
     async def set(self, key: str, value: dict[str, Any]) -> None: ...
 
+    async def clear(self) -> None: ...
+
     async def close(self) -> None: ...
 
 
@@ -63,6 +65,18 @@ class Cache:
             ex=settings.cache_ttl_seconds,
         )
 
+    async def clear(self) -> None:
+        """Drop cached answers so document changes take effect immediately."""
+
+        batch: list[str] = []
+        async for key in self._redis.scan_iter(match="rag:answer:*", count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                await self._redis.delete(*batch)
+                batch.clear()
+        if batch:
+            await self._redis.delete(*batch)
+
     async def close(self) -> None:
         await self._redis.aclose()
 
@@ -85,6 +99,9 @@ class MemoryCache:
 
     async def set(self, key: str, value: dict[str, Any]) -> None:
         self._store[key] = (time.time() + settings.cache_ttl_seconds, value)
+
+    async def clear(self) -> None:
+        self._store.clear()
 
     async def close(self) -> None:
         self._store.clear()

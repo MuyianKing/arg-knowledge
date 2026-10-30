@@ -61,13 +61,19 @@ class HtmlReader(BaseReader):
         return [Document(text=text, metadata=extra_info or {})]
 
 
-def _markdown_reader():
-    try:
-        from llama_index.readers.file import MarkdownReader
+class MarkdownTextReader(BaseReader):
+    """Read Markdown as raw text.
 
-        return MarkdownReader()
-    except Exception:
-        return None
+    ``llama_index``'s MarkdownReader strips every ``<...>`` run as HTML, inside
+    fenced code blocks included. That removes Vue/JSX tags and TypeScript/Java
+    generics from code samples, so users asking for those get chunks without
+    the code. Markdown headers and fences are handled by MarkdownNodeParser
+    during chunking, so the text can be kept as written.
+    """
+
+    def load_data(self, file: Path, extra_info: dict | None = None, **kwargs) -> list[Document]:
+        text = Path(file).read_text(encoding="utf-8", errors="ignore")
+        return [Document(text=text, metadata=extra_info or {})]
 
 
 def load_documents(path: Path) -> list[Document]:
@@ -78,14 +84,13 @@ def load_documents(path: Path) -> list[Document]:
         input_files = None
         input_dir = path
 
+    markdown_reader = MarkdownTextReader()
     file_extractor: dict[str, BaseReader] = {
         ".html": HtmlReader(),
         ".htm": HtmlReader(),
+        ".md": markdown_reader,
+        ".markdown": markdown_reader,
     }
-    md_reader = _markdown_reader()
-    if md_reader is not None:
-        file_extractor[".md"] = md_reader
-        file_extractor[".markdown"] = md_reader
 
     reader = SimpleDirectoryReader(
         input_dir=input_dir,

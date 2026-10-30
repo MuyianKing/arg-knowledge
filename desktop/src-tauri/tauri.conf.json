@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ARG Knowledge",
+  "version": "0.1.0",
+  "identifier": "com.argknowledge.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "ARG 知识库",
+        "width": 1120,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 620,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "resources": {
+      "resources/**/*": "resources/",
+      "../../app": "engine/app",
+      "../../scripts": "engine/scripts",
+      "../../requirements.txt": "engine/requirements.txt",
+      "../../pyproject.toml": "engine/pyproject.toml",
+      "../../.env.example": "engine/.env.example"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    },
+    "icon": ["icons/icon.png", "icons/icon.ico"]
+  }
+}

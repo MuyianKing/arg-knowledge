@@ -9,7 +9,7 @@
 | ReDoc | `http://127.0.0.1:8080/redoc` |
 | OpenAPI JSON | `http://127.0.0.1:8080/openapi.json`（本目录 `openapi.json` 为导出副本） |
 
-> 当前已实现 `/health`、`/api/v1/ask`；`DEV_TOOLS_ENABLED=true` 时额外提供 `/api/v1/dev/*` 调试接口（见第 7 节）。入库目前默认通过 `scripts/ingest.py` CLI 完成，HTTP 异步入库/删除接口见文末“规划中接口”。
+> 当前已实现 `/health`、`/api/v1/ask`、`/api/v1/ingest`、`/api/v1/jobs`、`/api/v1/documents`；`DEV_TOOLS_ENABLED=true` 时额外提供 `/api/v1/dev/*` 调试接口（见第 7 节）。
 
 ---
 
@@ -33,7 +33,7 @@ X-Request-Id: optional-client-id
 
 ## 2. GET /health
 
-健康检查。返回模型目录与 Qdrant 状态。
+健康检查。返回模型目录、Qdrant 状态与模型预热状态。
 
 **响应 200**
 
@@ -41,6 +41,9 @@ X-Request-Id: optional-client-id
 {
   "status": "ok",
   "ts": 1792560189,
+  "ready": true,
+  "warmup_ms": 8421,
+  "warmup_on_startup": true,
   "models": {
     "bge_m3": true,
     "bge_reranker": true,
@@ -54,6 +57,9 @@ X-Request-Id: optional-client-id
 |---|---|---|
 | `status` | string | `ok` / `degraded` |
 | `ts` | integer | Unix 时间戳 |
+| `ready` | boolean | BGE-M3、reranker、BM25 是否已加载进内存 |
+| `warmup_ms` | integer/null | 启动预热耗时；未启用预热时为 `null` |
+| `warmup_on_startup` | boolean | 是否配置了 `WARMUP_ON_STARTUP=true` |
 | `models` | object | 各模型目录是否存在 |
 | `qdrant` | boolean | Qdrant 是否可达 |
 
@@ -191,9 +197,11 @@ X-Request-Id: optional-client-id
 | 状态码 | 场景 | 响应 |
 |---|---|---|
 | 400 | 缺少/非法 `X-Tenant-Id` / `X-Acl`，或参数非法 | `{"detail": "..."}` |
+| 404 | job / document 不存在或不属于当前租户 | `{"detail": "..."}` |
 | 413 | 上传文件过大 | `{"detail": "..."}` |
 | 422 | 请求体校验失败（query 为空、top_k 越界等） | FastAPI 标准校验错误 |
 | 500 | 未处理异常 | `{"detail": "Internal Server Error"}` |
+| 503 | 入库流水线未初始化 | `{"detail": "..."}` |
 | 429 | 限流（规划中，尚未实现） | `{"detail": "..."}` |
 
 ---
@@ -243,9 +251,76 @@ print(response.json())
 
 ---
 
-## 5. 入库（当前 CLI）
+## 5. 入库与任务
 
-HTTP 入库接口尚未实现，当前使用：
+### 5.1 POST /api/v1/ingest
+
+上传文件并提交**异步入库任务**。接口立即返回 `job_id`，解析、切分、向量化、写入 Qdrant 在后台执行。
+
+**请求头**
+
+```http
+X-Tenant-Id: acme
+X-Acl: internal,finance
+Content-Type: multipart/form-data
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `file` | file | 是 | 后缀必须在支持列表内，大小受 `MAX_UPLOAD_MB` 限制 |
+| `version` | string | 否 | 默认 `v1` |
+| `doc_type` | string | 否 | 默认 `auto` |
+| `effective_date` | string | 否 | `YYYY-MM-DD` |
+
+**响应 202**
+
+```json
+{"job_id": "8f3a...", "status": "queued"}
+```
+
+任务状态：`queued` → `running` → `succeeded` / `failed`。同一进程内串行执行入库，避免重复加载模型和并发写库。
+
+### 5.2 GET /api/v1/jobs/{job_id}
+
+需要可信身份头；只能查询本租户的任务，否则返回 404。
+
+```json
+{
+  "id": "8f3a...",
+  "status": "running",
+  "stage": "embedding",
+  "filename": "差旅管理制度.md",
+  "tenant_id": "acme",
+  "acl": ["internal"],
+  "version": "v1",
+  "doc_type": "policy",
+  "effective_date": "2025-01-01",
+  "created_at": "2026-10-29T08:00:00+00:00",
+  "started_at": "2026-10-29T08:00:01+00:00",
+  "finished_at": null,
+  "documents": 0,
+  "chunks": 0,
+  "upserted": 0,
+  "error": null,
+  "progress": {"stage": "embedding", "current": 12, "total": 40}
+}
+```
+
+`progress` 在任务结束后为 `null`。`error` 最多保留 500 字符。
+
+### 5.3 GET /api/v1/jobs
+
+最近任务列表，按提交时间倒序。查询参数 `limit`（1~100，默认 20）。只返回本租户任务。
+
+```json
+{"items": [{"id": "...", "status": "succeeded", "...": "..."}]}
+```
+
+> 任务历史在内存中，默认保留最近 100 条；引擎重启后历史丢失，但已入库数据不受影响。多实例部署需要把 job store 换成 Redis/数据库。
+
+### 5.4 CLI 入库
+
+也可以继续用命令行批量入库：
 
 ```bash
 .venv/Scripts/python.exe scripts/ingest.py \
@@ -271,22 +346,59 @@ HTTP 入库接口尚未实现，当前使用：
 
 ---
 
-## 6. 规划中接口
+## 6. 文档管理
 
-以下接口在 `需求.md` 中已定义，当前代码尚未实现：
+### 6.1 GET /api/v1/documents
 
-| 方法 | 路径 | 说明 |
+按 tenant/acl 过滤，把 chunk 聚合成文档行。需要可信身份头。
+
+| 参数 | 默认 | 说明 |
 |---|---|---|
-| `POST` | `/api/v1/ingest` | 提交异步入库任务，返回 `job_id` |
-| `GET` | `/api/v1/jobs/{job_id}` | 查询任务状态、失败文档、重试次数 |
-| `GET` | `/api/v1/jobs` | 最近任务列表 |
-| `DELETE` | `/api/v1/documents/{doc_id}` | 删除文档及 chunk，清理缓存与引用 |
+| `version` | — | 精确版本 |
+| `doc_type` | — | 文档类型 |
+| `is_current` | 全部 | `true`/`false`；不传则包含历史版本 |
+| `max_points` | 5000 | 最多扫描的 chunk 数，1~50000 |
+
+```json
+{
+  "items": [
+    {
+      "doc_id": "3f9c...",
+      "source": "差旅管理制度.md",
+      "version": "v1",
+      "doc_type": "policy",
+      "effective_date": "2025-01-01T00:00:00",
+      "is_current": true,
+      "acl": ["internal"],
+      "chunks": 12
+    }
+  ],
+  "scanned_chunks": 12,
+  "truncated": false
+}
+```
+
+`truncated=true` 表示达到 `max_points` 后仍有未扫描数据；大规模知识库建议提高上限或改用分页/独立元数据表。
+
+### 6.2 DELETE /api/v1/documents/{doc_id}
+
+删除该文档在本租户、调用方 ACL 可见范围内的全部 chunk，并清理答案缓存。
+
+```json
+{"doc_id": "3f9c...", "deleted_chunks": 12}
+```
+
+不存在或不可见时返回 404。
+
+### 6.3 缓存失效
+
+入库任务成功和文档删除都会清理 `rag:answer:*` 缓存，避免旧答案在文档变更后继续返回。
 
 ---
 
 ## 7. 本地调试接口（仅 `DEV_TOOLS_ENABLED=true`）
 
-以下接口用于本地联调，**不属于引擎对外契约**，生产环境必须保持 `DEV_TOOLS_ENABLED=false`（此时路由不会注册，OpenAPI 中也看不到）。配套网页：`web/`，启动方式见 `README.md`。
+以下接口用于本地联调，**不属于引擎对外契约**，生产环境必须保持 `DEV_TOOLS_ENABLED=false`（此时路由不会注册，OpenAPI 中也看不到）。桌面客户端（`desktop/`）的 LLM 配置、仅检索、上传入库页面在调试模式下使用这些接口。
 
 ### 7.1 GET /api/v1/dev/llm
 
